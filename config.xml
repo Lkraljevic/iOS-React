@@ -6,10 +6,10 @@
         id        = "com.lkraljevic.IOS"
         version   = "1.0.0">
 
-    <name>IOS</name>
+    <name>iOS-React</name>
 
     <description>
-        Shell app 
+        iOS ReactJS Demo App
     </description>
 
     <author href="">
