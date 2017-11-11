@@ -60,7 +60,7 @@
 /******/ 	__webpack_require__.p = "";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 16);
+/******/ 	return __webpack_require__(__webpack_require__.s = 17);
 /******/ })
 /************************************************************************/
 /******/ ([
@@ -460,9 +460,9 @@ module.exports = shouldUseNative() ? Object.assign : function (target, source) {
 /* WEBPACK VAR INJECTION */(function(process) {
 
 if (process.env.NODE_ENV === 'production') {
-  module.exports = __webpack_require__(17);
-} else {
   module.exports = __webpack_require__(18);
+} else {
+  module.exports = __webpack_require__(19);
 }
 
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0)))
@@ -853,7 +853,7 @@ module.exports = shallowEqual;
  * 
  */
 
-var isTextNode = __webpack_require__(21);
+var isTextNode = __webpack_require__(22);
 
 /*eslint-disable no-bitwise */
 
@@ -954,41 +954,460 @@ module.exports = getActiveElement;
 
 /***/ }),
 /* 15 */
-/***/ (function(module, exports, __webpack_require__) {
+/***/ (function(module, exports) {
 
-/* WEBPACK VAR INJECTION */(function(process) {/**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
+/*
+	MIT License http://www.opensource.org/licenses/mit-license.php
+	Author Tobias Koppers @sokra
+*/
+// css base code, injected by the css-loader
+module.exports = function(useSourceMap) {
+	var list = [];
 
-if (process.env.NODE_ENV !== 'production') {
-  var REACT_ELEMENT_TYPE = (typeof Symbol === 'function' &&
-    Symbol.for &&
-    Symbol.for('react.element')) ||
-    0xeac7;
+	// return the list of modules as css string
+	list.toString = function toString() {
+		return this.map(function (item) {
+			var content = cssWithMappingToString(item, useSourceMap);
+			if(item[2]) {
+				return "@media " + item[2] + "{" + content + "}";
+			} else {
+				return content;
+			}
+		}).join("");
+	};
 
-  var isValidElement = function(object) {
-    return typeof object === 'object' &&
-      object !== null &&
-      object.$$typeof === REACT_ELEMENT_TYPE;
-  };
+	// import a list of modules into the list
+	list.i = function(modules, mediaQuery) {
+		if(typeof modules === "string")
+			modules = [[null, modules, ""]];
+		var alreadyImportedModules = {};
+		for(var i = 0; i < this.length; i++) {
+			var id = this[i][0];
+			if(typeof id === "number")
+				alreadyImportedModules[id] = true;
+		}
+		for(i = 0; i < modules.length; i++) {
+			var item = modules[i];
+			// skip already imported module
+			// this implementation is not 100% perfect for weird media query combinations
+			//  when a module is imported multiple times with different media queries.
+			//  I hope this will never occur (Hey this way we have smaller bundles)
+			if(typeof item[0] !== "number" || !alreadyImportedModules[item[0]]) {
+				if(mediaQuery && !item[2]) {
+					item[2] = mediaQuery;
+				} else if(mediaQuery) {
+					item[2] = "(" + item[2] + ") and (" + mediaQuery + ")";
+				}
+				list.push(item);
+			}
+		}
+	};
+	return list;
+};
 
-  // By explicitly using `prop-types` you are opting into new development behavior.
-  // http://fb.me/prop-types-in-prod
-  var throwOnDirectAccess = true;
-  module.exports = __webpack_require__(30)(isValidElement, throwOnDirectAccess);
-} else {
-  // By explicitly using `prop-types` you are opting into new production behavior.
-  // http://fb.me/prop-types-in-prod
-  module.exports = __webpack_require__(31)();
+function cssWithMappingToString(item, useSourceMap) {
+	var content = item[1] || '';
+	var cssMapping = item[3];
+	if (!cssMapping) {
+		return content;
+	}
+
+	if (useSourceMap && typeof btoa === 'function') {
+		var sourceMapping = toComment(cssMapping);
+		var sourceURLs = cssMapping.sources.map(function (source) {
+			return '/*# sourceURL=' + cssMapping.sourceRoot + source + ' */'
+		});
+
+		return [content].concat(sourceURLs).concat([sourceMapping]).join('\n');
+	}
+
+	return [content].join('\n');
 }
 
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0)))
+// Adapted from convert-source-map (MIT)
+function toComment(sourceMap) {
+	// eslint-disable-next-line no-undef
+	var base64 = btoa(unescape(encodeURIComponent(JSON.stringify(sourceMap))));
+	var data = 'sourceMappingURL=data:application/json;charset=utf-8;base64,' + base64;
+
+	return '/*# ' + data + ' */';
+}
+
 
 /***/ }),
 /* 16 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/*
+	MIT License http://www.opensource.org/licenses/mit-license.php
+	Author Tobias Koppers @sokra
+*/
+
+var stylesInDom = {};
+
+var	memoize = function (fn) {
+	var memo;
+
+	return function () {
+		if (typeof memo === "undefined") memo = fn.apply(this, arguments);
+		return memo;
+	};
+};
+
+var isOldIE = memoize(function () {
+	// Test for IE <= 9 as proposed by Browserhacks
+	// @see http://browserhacks.com/#hack-e71d8692f65334173fee715c222cb805
+	// Tests for existence of standard globals is to allow style-loader
+	// to operate correctly into non-standard environments
+	// @see https://github.com/webpack-contrib/style-loader/issues/177
+	return window && document && document.all && !window.atob;
+});
+
+var getElement = (function (fn) {
+	var memo = {};
+
+	return function(selector) {
+		if (typeof memo[selector] === "undefined") {
+			var styleTarget = fn.call(this, selector);
+			// Special case to return head of iframe instead of iframe itself
+			if (styleTarget instanceof window.HTMLIFrameElement) {
+				try {
+					// This will throw an exception if access to iframe is blocked
+					// due to cross-origin restrictions
+					styleTarget = styleTarget.contentDocument.head;
+				} catch(e) {
+					styleTarget = null;
+				}
+			}
+			memo[selector] = styleTarget;
+		}
+		return memo[selector]
+	};
+})(function (target) {
+	return document.querySelector(target)
+});
+
+var singleton = null;
+var	singletonCounter = 0;
+var	stylesInsertedAtTop = [];
+
+var	fixUrls = __webpack_require__(36);
+
+module.exports = function(list, options) {
+	if (typeof DEBUG !== "undefined" && DEBUG) {
+		if (typeof document !== "object") throw new Error("The style-loader cannot be used in a non-browser environment");
+	}
+
+	options = options || {};
+
+	options.attrs = typeof options.attrs === "object" ? options.attrs : {};
+
+	// Force single-tag solution on IE6-9, which has a hard limit on the # of <style>
+	// tags it will allow on a page
+	if (!options.singleton) options.singleton = isOldIE();
+
+	// By default, add <style> tags to the <head> element
+	if (!options.insertInto) options.insertInto = "head";
+
+	// By default, add <style> tags to the bottom of the target
+	if (!options.insertAt) options.insertAt = "bottom";
+
+	var styles = listToStyles(list, options);
+
+	addStylesToDom(styles, options);
+
+	return function update (newList) {
+		var mayRemove = [];
+
+		for (var i = 0; i < styles.length; i++) {
+			var item = styles[i];
+			var domStyle = stylesInDom[item.id];
+
+			domStyle.refs--;
+			mayRemove.push(domStyle);
+		}
+
+		if(newList) {
+			var newStyles = listToStyles(newList, options);
+			addStylesToDom(newStyles, options);
+		}
+
+		for (var i = 0; i < mayRemove.length; i++) {
+			var domStyle = mayRemove[i];
+
+			if(domStyle.refs === 0) {
+				for (var j = 0; j < domStyle.parts.length; j++) domStyle.parts[j]();
+
+				delete stylesInDom[domStyle.id];
+			}
+		}
+	};
+};
+
+function addStylesToDom (styles, options) {
+	for (var i = 0; i < styles.length; i++) {
+		var item = styles[i];
+		var domStyle = stylesInDom[item.id];
+
+		if(domStyle) {
+			domStyle.refs++;
+
+			for(var j = 0; j < domStyle.parts.length; j++) {
+				domStyle.parts[j](item.parts[j]);
+			}
+
+			for(; j < item.parts.length; j++) {
+				domStyle.parts.push(addStyle(item.parts[j], options));
+			}
+		} else {
+			var parts = [];
+
+			for(var j = 0; j < item.parts.length; j++) {
+				parts.push(addStyle(item.parts[j], options));
+			}
+
+			stylesInDom[item.id] = {id: item.id, refs: 1, parts: parts};
+		}
+	}
+}
+
+function listToStyles (list, options) {
+	var styles = [];
+	var newStyles = {};
+
+	for (var i = 0; i < list.length; i++) {
+		var item = list[i];
+		var id = options.base ? item[0] + options.base : item[0];
+		var css = item[1];
+		var media = item[2];
+		var sourceMap = item[3];
+		var part = {css: css, media: media, sourceMap: sourceMap};
+
+		if(!newStyles[id]) styles.push(newStyles[id] = {id: id, parts: [part]});
+		else newStyles[id].parts.push(part);
+	}
+
+	return styles;
+}
+
+function insertStyleElement (options, style) {
+	var target = getElement(options.insertInto)
+
+	if (!target) {
+		throw new Error("Couldn't find a style target. This probably means that the value for the 'insertInto' parameter is invalid.");
+	}
+
+	var lastStyleElementInsertedAtTop = stylesInsertedAtTop[stylesInsertedAtTop.length - 1];
+
+	if (options.insertAt === "top") {
+		if (!lastStyleElementInsertedAtTop) {
+			target.insertBefore(style, target.firstChild);
+		} else if (lastStyleElementInsertedAtTop.nextSibling) {
+			target.insertBefore(style, lastStyleElementInsertedAtTop.nextSibling);
+		} else {
+			target.appendChild(style);
+		}
+		stylesInsertedAtTop.push(style);
+	} else if (options.insertAt === "bottom") {
+		target.appendChild(style);
+	} else if (typeof options.insertAt === "object" && options.insertAt.before) {
+		var nextSibling = getElement(options.insertInto + " " + options.insertAt.before);
+		target.insertBefore(style, nextSibling);
+	} else {
+		throw new Error("[Style Loader]\n\n Invalid value for parameter 'insertAt' ('options.insertAt') found.\n Must be 'top', 'bottom', or Object.\n (https://github.com/webpack-contrib/style-loader#insertat)\n");
+	}
+}
+
+function removeStyleElement (style) {
+	if (style.parentNode === null) return false;
+	style.parentNode.removeChild(style);
+
+	var idx = stylesInsertedAtTop.indexOf(style);
+	if(idx >= 0) {
+		stylesInsertedAtTop.splice(idx, 1);
+	}
+}
+
+function createStyleElement (options) {
+	var style = document.createElement("style");
+
+	options.attrs.type = "text/css";
+
+	addAttrs(style, options.attrs);
+	insertStyleElement(options, style);
+
+	return style;
+}
+
+function createLinkElement (options) {
+	var link = document.createElement("link");
+
+	options.attrs.type = "text/css";
+	options.attrs.rel = "stylesheet";
+
+	addAttrs(link, options.attrs);
+	insertStyleElement(options, link);
+
+	return link;
+}
+
+function addAttrs (el, attrs) {
+	Object.keys(attrs).forEach(function (key) {
+		el.setAttribute(key, attrs[key]);
+	});
+}
+
+function addStyle (obj, options) {
+	var style, update, remove, result;
+
+	// If a transform function was defined, run it on the css
+	if (options.transform && obj.css) {
+	    result = options.transform(obj.css);
+
+	    if (result) {
+	    	// If transform returns a value, use that instead of the original css.
+	    	// This allows running runtime transformations on the css.
+	    	obj.css = result;
+	    } else {
+	    	// If the transform function returns a falsy value, don't add this css.
+	    	// This allows conditional loading of css
+	    	return function() {
+	    		// noop
+	    	};
+	    }
+	}
+
+	if (options.singleton) {
+		var styleIndex = singletonCounter++;
+
+		style = singleton || (singleton = createStyleElement(options));
+
+		update = applyToSingletonTag.bind(null, style, styleIndex, false);
+		remove = applyToSingletonTag.bind(null, style, styleIndex, true);
+
+	} else if (
+		obj.sourceMap &&
+		typeof URL === "function" &&
+		typeof URL.createObjectURL === "function" &&
+		typeof URL.revokeObjectURL === "function" &&
+		typeof Blob === "function" &&
+		typeof btoa === "function"
+	) {
+		style = createLinkElement(options);
+		update = updateLink.bind(null, style, options);
+		remove = function () {
+			removeStyleElement(style);
+
+			if(style.href) URL.revokeObjectURL(style.href);
+		};
+	} else {
+		style = createStyleElement(options);
+		update = applyToTag.bind(null, style);
+		remove = function () {
+			removeStyleElement(style);
+		};
+	}
+
+	update(obj);
+
+	return function updateStyle (newObj) {
+		if (newObj) {
+			if (
+				newObj.css === obj.css &&
+				newObj.media === obj.media &&
+				newObj.sourceMap === obj.sourceMap
+			) {
+				return;
+			}
+
+			update(obj = newObj);
+		} else {
+			remove();
+		}
+	};
+}
+
+var replaceText = (function () {
+	var textStore = [];
+
+	return function (index, replacement) {
+		textStore[index] = replacement;
+
+		return textStore.filter(Boolean).join('\n');
+	};
+})();
+
+function applyToSingletonTag (style, index, remove, obj) {
+	var css = remove ? "" : obj.css;
+
+	if (style.styleSheet) {
+		style.styleSheet.cssText = replaceText(index, css);
+	} else {
+		var cssNode = document.createTextNode(css);
+		var childNodes = style.childNodes;
+
+		if (childNodes[index]) style.removeChild(childNodes[index]);
+
+		if (childNodes.length) {
+			style.insertBefore(cssNode, childNodes[index]);
+		} else {
+			style.appendChild(cssNode);
+		}
+	}
+}
+
+function applyToTag (style, obj) {
+	var css = obj.css;
+	var media = obj.media;
+
+	if(media) {
+		style.setAttribute("media", media)
+	}
+
+	if(style.styleSheet) {
+		style.styleSheet.cssText = css;
+	} else {
+		while(style.firstChild) {
+			style.removeChild(style.firstChild);
+		}
+
+		style.appendChild(document.createTextNode(css));
+	}
+}
+
+function updateLink (link, options, obj) {
+	var css = obj.css;
+	var sourceMap = obj.sourceMap;
+
+	/*
+		If convertToAbsoluteUrls isn't defined, but sourcemaps are enabled
+		and there is no publicPath defined then lets turn convertToAbsoluteUrls
+		on by default.  Otherwise default to the convertToAbsoluteUrls option
+		directly
+	*/
+	var autoFixUrls = options.convertToAbsoluteUrls === undefined && sourceMap;
+
+	if (options.convertToAbsoluteUrls || autoFixUrls) {
+		css = fixUrls(css);
+	}
+
+	if (sourceMap) {
+		// http://stackoverflow.com/a/26603875
+		css += "\n/*# sourceMappingURL=data:application/json;base64," + btoa(unescape(encodeURIComponent(JSON.stringify(sourceMap)))) + " */";
+	}
+
+	var blob = new Blob([css], { type: "text/css" });
+
+	var oldSrc = link.href;
+
+	link.href = URL.createObjectURL(blob);
+
+	if(oldSrc) URL.revokeObjectURL(oldSrc);
+}
+
+
+/***/ }),
+/* 17 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1004,13 +1423,15 @@ var _react = __webpack_require__(4);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactDom = __webpack_require__(19);
+var _reactDom = __webpack_require__(20);
 
 var _reactDom2 = _interopRequireDefault(_reactDom);
 
-var _reactSidebar = __webpack_require__(32);
+__webpack_require__(34);
 
-var _reactSidebar2 = _interopRequireDefault(_reactSidebar);
+var _sidebar = __webpack_require__(37);
+
+var _sidebar2 = _interopRequireDefault(_sidebar);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -1019,6 +1440,8 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
 
 function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
+//import Sidebar from 'react-sidebar';
+
 
 var App = function (_React$Component) {
   _inherits(App, _React$Component);
@@ -1044,9 +1467,10 @@ var App = function (_React$Component) {
   }, {
     key: 'render',
     value: function render() {
+      //var sidebarContent = <div style={{width:256}}><b>Sidebar content</b></div>;
       var sidebarContent = _react2.default.createElement(
         'div',
-        { style: { width: 256 } },
+        { style: {} },
         _react2.default.createElement(
           'b',
           null,
@@ -1055,16 +1479,26 @@ var App = function (_React$Component) {
       );
 
       return _react2.default.createElement(
-        _reactSidebar2.default,
-        { sidebar: sidebarContent,
-          open: this.state.sidebarOpen,
-          onSetOpen: this.onSetSidebarOpen },
+        _sidebar2.default,
+        { side: 'left', sidebar: sidebarContent },
         _react2.default.createElement(
-          'b',
+          'div',
           null,
-          'Main content'
+          _react2.default.createElement(
+            'b',
+            null,
+            'Main content'
+          )
         )
-      );
+      )
+      /*
+       <Sidebar sidebar={sidebarContent}
+               open={this.state.sidebarOpen}
+               onSetOpen={this.onSetSidebarOpen}>
+        <b>Main content</b>
+      </Sidebar>
+      */
+      ;
     }
   }]);
 
@@ -1079,7 +1513,7 @@ exports.default = App;
 _reactDom2.default.render(_react2.default.createElement(App, null), document.getElementById('app'));
 
 /***/ }),
-/* 17 */
+/* 18 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1109,7 +1543,7 @@ module.exports={Children:{map:S.map,forEach:S.forEach,count:S.count,toArray:S.to
 
 
 /***/ }),
-/* 18 */
+/* 19 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2815,7 +3249,7 @@ module.exports = ReactEntry;
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0)))
 
 /***/ }),
-/* 19 */
+/* 20 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2853,15 +3287,15 @@ if (process.env.NODE_ENV === 'production') {
   // DCE check should happen before ReactDOM bundle executes so that
   // DevTools can report bad minification during injection.
   checkDCE();
-  module.exports = __webpack_require__(20);
+  module.exports = __webpack_require__(21);
 } else {
-  module.exports = __webpack_require__(23);
+  module.exports = __webpack_require__(24);
 }
 
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0)))
 
 /***/ }),
-/* 20 */
+/* 21 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -3124,7 +3558,7 @@ unstable_deferredUpdates:Xj.deferredUpdates,flushSync:Xj.flushSync,__SECRET_INTE
 
 
 /***/ }),
-/* 21 */
+/* 22 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -3139,7 +3573,7 @@ unstable_deferredUpdates:Xj.deferredUpdates,flushSync:Xj.flushSync,__SECRET_INTE
  * @typechecks
  */
 
-var isNode = __webpack_require__(22);
+var isNode = __webpack_require__(23);
 
 /**
  * @param {*} object The object to check.
@@ -3152,7 +3586,7 @@ function isTextNode(object) {
 module.exports = isTextNode;
 
 /***/ }),
-/* 22 */
+/* 23 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -3180,7 +3614,7 @@ function isNode(object) {
 module.exports = isNode;
 
 /***/ }),
-/* 23 */
+/* 24 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -3206,11 +3640,11 @@ var ExecutionEnvironment = __webpack_require__(9);
 var _assign = __webpack_require__(3);
 var EventListener = __webpack_require__(10);
 var require$$0 = __webpack_require__(6);
-var hyphenateStyleName = __webpack_require__(24);
+var hyphenateStyleName = __webpack_require__(25);
 var emptyFunction = __webpack_require__(1);
-var camelizeStyleName = __webpack_require__(26);
-var performanceNow = __webpack_require__(28);
-var propTypes = __webpack_require__(15);
+var camelizeStyleName = __webpack_require__(27);
+var performanceNow = __webpack_require__(29);
+var propTypes = __webpack_require__(31);
 var emptyObject = __webpack_require__(5);
 var checkPropTypes = __webpack_require__(7);
 var shallowEqual = __webpack_require__(11);
@@ -20409,7 +20843,7 @@ module.exports = ReactDOMFiberEntry;
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0)))
 
 /***/ }),
-/* 24 */
+/* 25 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -20424,7 +20858,7 @@ module.exports = ReactDOMFiberEntry;
 
 
 
-var hyphenate = __webpack_require__(25);
+var hyphenate = __webpack_require__(26);
 
 var msPattern = /^ms-/;
 
@@ -20451,7 +20885,7 @@ function hyphenateStyleName(string) {
 module.exports = hyphenateStyleName;
 
 /***/ }),
-/* 25 */
+/* 26 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -20487,7 +20921,7 @@ function hyphenate(string) {
 module.exports = hyphenate;
 
 /***/ }),
-/* 26 */
+/* 27 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -20502,7 +20936,7 @@ module.exports = hyphenate;
 
 
 
-var camelize = __webpack_require__(27);
+var camelize = __webpack_require__(28);
 
 var msPattern = /^-ms-/;
 
@@ -20530,7 +20964,7 @@ function camelizeStyleName(string) {
 module.exports = camelizeStyleName;
 
 /***/ }),
-/* 27 */
+/* 28 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -20565,7 +20999,7 @@ function camelize(string) {
 module.exports = camelize;
 
 /***/ }),
-/* 28 */
+/* 29 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -20580,7 +21014,7 @@ module.exports = camelize;
  * @typechecks
  */
 
-var performance = __webpack_require__(29);
+var performance = __webpack_require__(30);
 
 var performanceNow;
 
@@ -20602,7 +21036,7 @@ if (performance.now) {
 module.exports = performanceNow;
 
 /***/ }),
-/* 29 */
+/* 30 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -20628,7 +21062,42 @@ if (ExecutionEnvironment.canUseDOM) {
 module.exports = performance || {};
 
 /***/ }),
-/* 30 */
+/* 31 */
+/***/ (function(module, exports, __webpack_require__) {
+
+/* WEBPACK VAR INJECTION */(function(process) {/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+if (process.env.NODE_ENV !== 'production') {
+  var REACT_ELEMENT_TYPE = (typeof Symbol === 'function' &&
+    Symbol.for &&
+    Symbol.for('react.element')) ||
+    0xeac7;
+
+  var isValidElement = function(object) {
+    return typeof object === 'object' &&
+      object !== null &&
+      object.$$typeof === REACT_ELEMENT_TYPE;
+  };
+
+  // By explicitly using `prop-types` you are opting into new development behavior.
+  // http://fb.me/prop-types-in-prod
+  var throwOnDirectAccess = true;
+  module.exports = __webpack_require__(32)(isValidElement, throwOnDirectAccess);
+} else {
+  // By explicitly using `prop-types` you are opting into new production behavior.
+  // http://fb.me/prop-types-in-prod
+  module.exports = __webpack_require__(33)();
+}
+
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0)))
+
+/***/ }),
+/* 32 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -21178,7 +21647,7 @@ module.exports = function(isValidElement, throwOnDirectAccess) {
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(0)))
 
 /***/ }),
-/* 31 */
+/* 33 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -21243,26 +21712,147 @@ module.exports = function() {
 
 
 /***/ }),
-/* 32 */
+/* 34 */
 /***/ (function(module, exports, __webpack_require__) {
 
-"use strict";
+// style-loader: Adds some css to the DOM by adding a <style> tag
 
+// load the styles
+var content = __webpack_require__(35);
+if(typeof content === 'string') content = [[module.i, content, '']];
+// Prepare cssTransformation
+var transform;
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-
-var _sidebar = __webpack_require__(33);
-
-var _sidebar2 = _interopRequireDefault(_sidebar);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-exports.default = _sidebar2.default;
+var options = {"hmr":true}
+options.transform = transform
+// add the styles to the DOM
+var update = __webpack_require__(16)(content, options);
+if(content.locals) module.exports = content.locals;
+// Hot Module Replacement
+if(false) {
+	// When the styles change, update the <style> tags
+	if(!content.locals) {
+		module.hot.accept("!!../../node_modules/css-loader/index.js!./app.css", function() {
+			var newContent = require("!!../../node_modules/css-loader/index.js!./app.css");
+			if(typeof newContent === 'string') newContent = [[module.id, newContent, '']];
+			update(newContent);
+		});
+	}
+	// When the module is disposed, remove the <style> tags
+	module.hot.dispose(function() { update(); });
+}
 
 /***/ }),
-/* 33 */
+/* 35 */
+/***/ (function(module, exports, __webpack_require__) {
+
+exports = module.exports = __webpack_require__(15)(undefined);
+// imports
+
+
+// module
+exports.push([module.i, "html, body, #app {\n  width: 100%;\n  height: 100%;\n  margin: 0;\n}\n\n", ""]);
+
+// exports
+
+
+/***/ }),
+/* 36 */
+/***/ (function(module, exports) {
+
+
+/**
+ * When source maps are enabled, `style-loader` uses a link element with a data-uri to
+ * embed the css on the page. This breaks all relative urls because now they are relative to a
+ * bundle instead of the current page.
+ *
+ * One solution is to only use full urls, but that may be impossible.
+ *
+ * Instead, this function "fixes" the relative urls to be absolute according to the current page location.
+ *
+ * A rudimentary test suite is located at `test/fixUrls.js` and can be run via the `npm test` command.
+ *
+ */
+
+module.exports = function (css) {
+  // get current location
+  var location = typeof window !== "undefined" && window.location;
+
+  if (!location) {
+    throw new Error("fixUrls requires window.location");
+  }
+
+	// blank or null?
+	if (!css || typeof css !== "string") {
+	  return css;
+  }
+
+  var baseUrl = location.protocol + "//" + location.host;
+  var currentDir = baseUrl + location.pathname.replace(/\/[^\/]*$/, "/");
+
+	// convert each url(...)
+	/*
+	This regular expression is just a way to recursively match brackets within
+	a string.
+
+	 /url\s*\(  = Match on the word "url" with any whitespace after it and then a parens
+	   (  = Start a capturing group
+	     (?:  = Start a non-capturing group
+	         [^)(]  = Match anything that isn't a parentheses
+	         |  = OR
+	         \(  = Match a start parentheses
+	             (?:  = Start another non-capturing groups
+	                 [^)(]+  = Match anything that isn't a parentheses
+	                 |  = OR
+	                 \(  = Match a start parentheses
+	                     [^)(]*  = Match anything that isn't a parentheses
+	                 \)  = Match a end parentheses
+	             )  = End Group
+              *\) = Match anything and then a close parens
+          )  = Close non-capturing group
+          *  = Match anything
+       )  = Close capturing group
+	 \)  = Match a close parens
+
+	 /gi  = Get all matches, not the first.  Be case insensitive.
+	 */
+	var fixedCss = css.replace(/url\s*\(((?:[^)(]|\((?:[^)(]+|\([^)(]*\))*\))*)\)/gi, function(fullMatch, origUrl) {
+		// strip quotes (if they exist)
+		var unquotedOrigUrl = origUrl
+			.trim()
+			.replace(/^"(.*)"$/, function(o, $1){ return $1; })
+			.replace(/^'(.*)'$/, function(o, $1){ return $1; });
+
+		// already a full url? no change
+		if (/^(#|data:|http:\/\/|https:\/\/|file:\/\/\/)/i.test(unquotedOrigUrl)) {
+		  return fullMatch;
+		}
+
+		// convert the url to a full url
+		var newUrl;
+
+		if (unquotedOrigUrl.indexOf("//") === 0) {
+		  	//TODO: should we add protocol?
+			newUrl = unquotedOrigUrl;
+		} else if (unquotedOrigUrl.indexOf("/") === 0) {
+			// path should be relative to the base url
+			newUrl = baseUrl + unquotedOrigUrl; // already starts with '/'
+		} else {
+			// path should be relative to current directory
+			newUrl = currentDir + unquotedOrigUrl.replace(/^\.\//, ""); // Strip leading './'
+		}
+
+		// send back the fixed url(...)
+		return "url(" + JSON.stringify(newUrl) + ")";
+	});
+
+	// send back the fixed css
+	return fixedCss;
+};
+
+
+/***/ }),
+/* 37 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -21271,10 +21861,6 @@ exports.default = _sidebar2.default;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-
-var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
 
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
@@ -21282,9 +21868,7 @@ var _react = __webpack_require__(4);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _propTypes = __webpack_require__(15);
-
-var _propTypes2 = _interopRequireDefault(_propTypes);
+__webpack_require__(38);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -21293,8 +21877,6 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 function _possibleConstructorReturn(self, call) { if (!self) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return call && (typeof call === "object" || typeof call === "function") ? call : self; }
 
 function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
-
-var CANCEL_DISTANCE_ON_SCROLL = 20;
 
 var defaultStyles = {
   root: {
@@ -21345,393 +21927,287 @@ var defaultStyles = {
   }
 };
 
-var Sidebar = function (_Component) {
-  _inherits(Sidebar, _Component);
+//
+// @props: panel -> visible panel,  
+// @props: side bar -> side panel
 
-  function Sidebar(props) {
-    _classCallCheck(this, Sidebar);
+var Drawer = function (_React$Component) {
+  _inherits(Drawer, _React$Component);
 
-    var _this = _possibleConstructorReturn(this, (Sidebar.__proto__ || Object.getPrototypeOf(Sidebar)).call(this, props));
+  function Drawer(props) {
+    _classCallCheck(this, Drawer);
+
+    var _this = _possibleConstructorReturn(this, (Drawer.__proto__ || Object.getPrototypeOf(Drawer)).call(this, props));
 
     _this.state = {
-      // the detected width of the sidebar in pixels
-      sidebarWidth: props.defaultSidebarWidth,
-
-      // keep track of touching params
-      touchIdentifier: null,
-      touchStartX: null,
-      touchStartY: null,
-      touchCurrentX: null,
-      touchCurrentY: null,
-
-      // if touch is supported by the browser
-      dragSupported: false
+      //mask,
+      //handle,
+      //newPos: 0,
+      currentPos: 0, // 0 || width
+      startPoint: [0, 0], // [x,y]  x,y=>[0,width]
+      //direction,
+      drawerClassName: new Set(['drawer']),
+      drawerTransformStyle: {},
+      isVisible: false
+    };
+    _this.defaults = {
+      width: 280,
+      zIndex: 99999,
+      disableSlide: false,
+      handleSize: 25,
+      disableMask: false,
+      maxMaskOpacity: 0.5,
+      side: props.side || 'left'
     };
 
-    _this.overlayClicked = _this.overlayClicked.bind(_this);
-    _this.onTouchStart = _this.onTouchStart.bind(_this);
-    _this.onTouchMove = _this.onTouchMove.bind(_this);
-    _this.onTouchEnd = _this.onTouchEnd.bind(_this);
-    _this.onScroll = _this.onScroll.bind(_this);
-    _this.saveSidebarRef = _this.saveSidebarRef.bind(_this);
+    _this._onTouchStart = _this._onTouchStart.bind(_this);
+    _this._onTouchMove = _this._onTouchMove.bind(_this);
+    _this._onTouchEnd = _this._onTouchEnd.bind(_this);
     return _this;
   }
 
-  _createClass(Sidebar, [{
-    key: 'componentDidMount',
-    value: function componentDidMount() {
-      this.setState({
-        dragSupported: (typeof window === 'undefined' ? 'undefined' : _typeof(window)) === 'object' && 'ontouchstart' in window
-      });
-      this.saveSidebarWidth();
-    }
-  }, {
-    key: 'componentDidUpdate',
-    value: function componentDidUpdate() {
-      // filter out the updates when we're touching
-      if (!this.isTouching()) {
-        this.saveSidebarWidth();
-      }
-    }
-  }, {
-    key: 'onTouchStart',
-    value: function onTouchStart(ev) {
-      // filter out if a user starts swiping with a second finger
-      if (!this.isTouching()) {
-        var touch = ev.targetTouches[0];
-        this.setState({
-          touchIdentifier: touch.identifier,
-          touchStartX: touch.clientX,
-          touchStartY: touch.clientY,
-          touchCurrentX: touch.clientX,
-          touchCurrentY: touch.clientY
-        });
-      }
-    }
-  }, {
-    key: 'onTouchMove',
-    value: function onTouchMove(ev) {
-      if (this.isTouching()) {
-        for (var ind = 0; ind < ev.targetTouches.length; ind++) {
-          // we only care about the finger that we are tracking
-          if (ev.targetTouches[ind].identifier === this.state.touchIdentifier) {
-            this.setState({
-              touchCurrentX: ev.targetTouches[ind].clientX,
-              touchCurrentY: ev.targetTouches[ind].clientY
-            });
-            break;
-          }
-        }
-      }
-    }
-  }, {
-    key: 'onTouchEnd',
-    value: function onTouchEnd() {
-      if (this.isTouching()) {
-        // trigger a change to open if sidebar has been dragged beyond dragToggleDistance
-        var touchWidth = this.touchSidebarWidth();
-
-        if (this.props.open && touchWidth < this.state.sidebarWidth - this.props.dragToggleDistance || !this.props.open && touchWidth > this.props.dragToggleDistance) {
-          this.props.onSetOpen(!this.props.open);
-        }
-
-        this.setState({
-          touchIdentifier: null,
-          touchStartX: null,
-          touchStartY: null,
-          touchCurrentX: null,
-          touchCurrentY: null
-        });
-      }
-    }
-
-    // This logic helps us prevents the user from sliding the sidebar horizontally
-    // while scrolling the sidebar vertically. When a scroll event comes in, we're
-    // cancelling the ongoing gesture if it did not move horizontally much.
-
-  }, {
-    key: 'onScroll',
-    value: function onScroll() {
-      if (this.isTouching() && this.inCancelDistanceOnScroll()) {
-        this.setState({
-          touchIdentifier: null,
-          touchStartX: null,
-          touchStartY: null,
-          touchCurrentX: null,
-          touchCurrentY: null
-        });
-      }
-    }
-
-    // True if the on going gesture X distance is less than the cancel distance
-
-  }, {
-    key: 'inCancelDistanceOnScroll',
-    value: function inCancelDistanceOnScroll() {
-      var cancelDistanceOnScroll = void 0;
-
-      if (this.props.pullRight) {
-        cancelDistanceOnScroll = Math.abs(this.state.touchCurrentX - this.state.touchStartX) < CANCEL_DISTANCE_ON_SCROLL;
-      } else {
-        cancelDistanceOnScroll = Math.abs(this.state.touchStartX - this.state.touchCurrentX) < CANCEL_DISTANCE_ON_SCROLL;
-      }
-      return cancelDistanceOnScroll;
-    }
-  }, {
-    key: 'isTouching',
-    value: function isTouching() {
-      return this.state.touchIdentifier !== null;
-    }
-  }, {
-    key: 'overlayClicked',
-    value: function overlayClicked() {
-      if (this.props.open) {
-        this.props.onSetOpen(false);
-      }
-    }
-  }, {
-    key: 'saveSidebarWidth',
-    value: function saveSidebarWidth() {
-      var width = this.sidebar.offsetWidth;
-
-      if (width !== this.state.sidebarWidth) {
-        this.setState({ sidebarWidth: width });
-      }
-    }
-  }, {
-    key: 'saveSidebarRef',
-    value: function saveSidebarRef(node) {
-      this.sidebar = node;
-    }
-
-    // calculate the sidebarWidth based on current touch info
-
-  }, {
-    key: 'touchSidebarWidth',
-    value: function touchSidebarWidth() {
-      // if the sidebar is open and start point of drag is inside the sidebar
-      // we will only drag the distance they moved their finger
-      // otherwise we will move the sidebar to be below the finger.
-      if (this.props.pullRight) {
-        if (this.props.open && window.innerWidth - this.state.touchStartX < this.state.sidebarWidth) {
-          if (this.state.touchCurrentX > this.state.touchStartX) {
-            return this.state.sidebarWidth + this.state.touchStartX - this.state.touchCurrentX;
-          }
-          return this.state.sidebarWidth;
-        }
-        return Math.min(window.innerWidth - this.state.touchCurrentX, this.state.sidebarWidth);
-      }
-
-      if (this.props.open && this.state.touchStartX < this.state.sidebarWidth) {
-        if (this.state.touchCurrentX > this.state.touchStartX) {
-          return this.state.sidebarWidth;
-        }
-        return this.state.sidebarWidth - this.state.touchStartX + this.state.touchCurrentX;
-      }
-      return Math.min(this.state.touchCurrentX, this.state.sidebarWidth);
-    }
-  }, {
+  _createClass(Drawer, [{
     key: 'render',
     value: function render() {
-      var sidebarStyle = _extends({}, defaultStyles.sidebar, this.props.styles.sidebar);
-      var contentStyle = _extends({}, defaultStyles.content, this.props.styles.content);
-      var overlayStyle = _extends({}, defaultStyles.overlay, this.props.styles.overlay);
-      var useTouch = this.state.dragSupported && this.props.touch;
-      var isTouching = this.isTouching();
-      var rootProps = {
-        className: this.props.rootClassName,
-        style: _extends({}, defaultStyles.root, this.props.styles.root),
-        role: "navigation"
+      var drawerStyle = {
+        zIndex: this.defaults.zIndex,
+        width: this.defaults.width + 'px',
+        background: 'red'
       };
-      var dragHandle = void 0;
+      Object.assign(drawerStyle, this.state.drawerTransformStyle);
 
-      // sidebarStyle right/left
-      if (this.props.pullRight) {
-        sidebarStyle.right = 0;
-        sidebarStyle.transform = 'translateX(100%)';
-        sidebarStyle.WebkitTransform = 'translateX(100%)';
-        if (this.props.shadow) {
-          sidebarStyle.boxShadow = '-2px 2px 4px rgba(0, 0, 0, 0.15)';
-        }
-      } else {
-        sidebarStyle.left = 0;
-        sidebarStyle.transform = 'translateX(-100%)';
-        sidebarStyle.WebkitTransform = 'translateX(-100%)';
-        if (this.props.shadow) {
-          sidebarStyle.boxShadow = '2px 2px 4px rgba(0, 0, 0, 0.15)';
-        }
-      }
+      if (this.defaults.side == 'left') drawerStyle.left = -this.defaults.width + 'px';else if (this.defaults.side == 'right') drawerStyle.right = -this.defaults.width + 'px';
+      var drawerHandleStyle = {
+        width: this.defaults.handleSize + 'px',
+        background: 'yellow'
+      };
 
-      if (isTouching) {
-        var percentage = this.touchSidebarWidth() / this.state.sidebarWidth;
+      if (this.defaults.side == 'left') drawerHandleStyle.right = -this.defaults.handleSize + 'px';else if (this.defaults.side == 'right') drawerHandleStyle.left = -this.defaults.handleSize + 'px';
 
-        // slide open to what we dragged
-        if (this.props.pullRight) {
-          sidebarStyle.transform = 'translateX(' + (1 - percentage) * 100 + '%)';
-          sidebarStyle.WebkitTransform = 'translateX(' + (1 - percentage) * 100 + '%)';
-        } else {
-          sidebarStyle.transform = 'translateX(-' + (1 - percentage) * 100 + '%)';
-          sidebarStyle.WebkitTransform = 'translateX(-' + (1 - percentage) * 100 + '%)';
-        }
-
-        // fade overlay to match distance of drag
-        overlayStyle.opacity = percentage;
-        overlayStyle.visibility = 'visible';
-      } else if (this.props.docked) {
-        // show sidebar
-        if (this.state.sidebarWidth !== 0) {
-          sidebarStyle.transform = 'translateX(0%)';
-          sidebarStyle.WebkitTransform = 'translateX(0%)';
-        }
-
-        // make space on the left/right side of the content for the sidebar
-        if (this.props.pullRight) {
-          contentStyle.right = this.state.sidebarWidth + 'px';
-        } else {
-          contentStyle.left = this.state.sidebarWidth + 'px';
-        }
-      } else if (this.props.open) {
-        // slide open sidebar
-        sidebarStyle.transform = 'translateX(0%)';
-        sidebarStyle.WebkitTransform = 'translateX(0%)';
-
-        // show overlay
-        overlayStyle.opacity = 1;
-        overlayStyle.visibility = 'visible';
-      }
-
-      if (isTouching || !this.props.transitions) {
-        sidebarStyle.transition = 'none';
-        sidebarStyle.WebkitTransition = 'none';
-        contentStyle.transition = 'none';
-        overlayStyle.transition = 'none';
-      }
-
-      if (useTouch) {
-        if (this.props.open) {
-          rootProps.onTouchStart = this.onTouchStart;
-          rootProps.onTouchMove = this.onTouchMove;
-          rootProps.onTouchEnd = this.onTouchEnd;
-          rootProps.onTouchCancel = this.onTouchEnd;
-          rootProps.onScroll = this.onScroll;
-        } else {
-          var dragHandleStyle = _extends({}, defaultStyles.dragHandle, this.props.styles.dragHandle);
-          dragHandleStyle.width = this.props.touchHandleWidth;
-
-          // dragHandleStyle right/left
-          if (this.props.pullRight) {
-            dragHandleStyle.right = 0;
-          } else {
-            dragHandleStyle.left = 0;
-          }
-
-          dragHandle = _react2.default.createElement('div', { style: dragHandleStyle,
-            onTouchStart: this.onTouchStart, onTouchMove: this.onTouchMove,
-            onTouchEnd: this.onTouchEnd, onTouchCancel: this.onTouchEnd });
-        }
-      }
+      var drawerClassName = Array.from(this.state.drawerClassName).join(" ");
 
       return _react2.default.createElement(
         'div',
-        rootProps,
+        { className: 'drawer-wrapper' },
+        this.props.sidebar,
         _react2.default.createElement(
           'div',
-          { className: this.props.sidebarClassName, style: sidebarStyle, ref: this.saveSidebarRef },
-          this.props.sidebar
-        ),
-        _react2.default.createElement('div', { className: this.props.overlayClassName,
-          style: overlayStyle,
-          role: 'presentation',
-          tabIndex: '0',
-          onClick: this.overlayClicked
-        }),
-        _react2.default.createElement(
-          'div',
-          { className: this.props.contentClassName, style: contentStyle },
-          dragHandle,
+          { className: drawerClassName, style: drawerStyle, onTouchStart: this._onTouchStart, onTouchMove: this._onTouchMove, onTouchEnd: this._onTouchEnd },
+          _react2.default.createElement(
+            'div',
+            { className: 'drawer-handle', style: drawerHandleStyle },
+            ' '
+          ),
           this.props.children
+        ),
+        _react2.default.createElement(
+          'div',
+          { className: 'drawer-mask' },
+          ' '
         )
       );
     }
+  }, {
+    key: 'componentWillUpdate',
+    value: function componentWillUpdate(nextProps, nextState) {
+      // console.log(nextState.drawerClassName);
+      //console.log(nextState.drawerTransformStyle);
+    }
+  }, {
+    key: '_onTouchStart',
+    value: function _onTouchStart(e) {
+      this.setState({
+        startPoint: [parseInt(e.changedTouches[0].clientX), parseInt(e.changedTouches[0].clientY)]
+      });
+      //this._removeDrawerClass('opened');
+      //this._removeDrawerClass('closed');
+      this._changeDrawerClass([], ['opened', 'closed']);
+      //options.target.addEventListener('touchmove', touchmove);
+      //e.stopPropagation();
+    }
+  }, {
+    key: '_onTouchMove',
+    value: function _onTouchMove(e) {
+      var direction = void 0;
+      e.stopPropagation();
+      e.nativeEvent.stopImmediatePropagation();
+
+      if (!this.state.direction) direction = Math.abs(Math.abs(this.state.startPoint[0]) - Math.abs(e.changedTouches[0].clientX)) > Math.abs(Math.abs(this.state.startPoint[1]) - Math.abs(-e.changedTouches[0].clientY)) ? 'horizontal' : 'vertical';
+
+      this.newPos = parseInt(e.changedTouches[0].clientX) - (this.state.startPoint[0] - this.state.currentPos);
+      if (direction == 'horizontal') {
+        // self.changeMenuPos();
+        this.changeMenuPos();
+        e.stopPropagation();
+      }
+      this.setState({ direction: direction });
+    }
+  }, {
+    key: '_onTouchEnd',
+    value: function _onTouchEnd(e) {
+      //options.target.removeEventListener('touchmove', touchmove);
+      this.checkMenuState();
+      this.setState({ direction: false });
+    }
+  }, {
+    key: 'changeMenuPos',
+    value: function changeMenuPos() {
+      var style = {};
+
+      if (this.newPos >= this.defaults.width && this.defaults.side == 'left' || this.newPos <= -this.defaults.width && this.defaults.side == 'right') this.newPos = this.defaults.side == 'left' ? this.defaults.width : -this.defaults.width;
+
+      style.transform = 'translateX(' + this.newPos + 'px)';
+      style.WebkitTransform = 'translateX(' + this.newPos + 'px)';
+      style.MozTransform = 'translateX(' + this.newPos + 'px)';
+      //this.setMaskOpacity(newPos);
+
+
+      this.setState({
+        drawerTransformStyle: style
+      });
+    }
+  }, {
+    key: 'checkMenuState',
+    value: function checkMenuState() {
+      var threshold;
+      if (this.defaults.side == 'left') {
+        if (this.state.isVisible) threshold = this.defaults.width - 100;else threshold = 100;
+      }
+
+      if (this.defaults.side == 'right') {
+        if (this.state.isVisible) threshold = -(this.defaults.width - 100);else threshold = -100;
+      }
+
+      if (this.defaults.side == 'left' && this.newPos >= threshold || this.defaults.side == 'right' && this.newPos <= threshold) {
+        this.open();
+      } else {
+        this.close();
+      }
+    }
+  }, {
+    key: 'open',
+    value: function open() {
+
+      //this._removeDrawerClass('closed');
+      //this._addDrawerClass('opened');
+      this._changeDrawerClass(['opened'], ['closed']);
+
+      var openPosition = this.defaults.side == 'left' ? this.defaults.width : -this.defaults.width;
+      var style = {};
+      style.transform = 'translate3d(' + openPosition + 'px, 0, 0)';
+      style.WebkitTransform = 'translate3d(' + openPosition + 'px, 0, 0)';
+      style.MozTransform = 'translate3d(' + openPosition + 'px, 0, 0)';
+
+      // State
+      this.setState({
+        currentPos: openPosition,
+        isVisible: true,
+        drawerTransformStyle: style
+      });
+
+      //self.showMask();
+      //self.invoke(options.onOpen);
+
+      //options.onChange(true);
+    }
+  }, {
+    key: 'close',
+    value: function close() {
+
+      //this._removeDrawerClass('opened');
+      //this._addDrawerClass('closed');
+      this._changeDrawerClass(['closed'], ['opened']);
+      var style = {};
+      style.transform = 'translate3d(0, 0, 0)';
+      style.WebkitTransform = 'translate3d(0, 0, 0)';
+      style.MozTransform = 'translate3d(0, 0, 0)';
+
+      this.setState({
+        currentPos: 0,
+        isVisible: false,
+        drawerTransformStyle: style
+      });
+
+      //self.hideMask();
+      //self.invoke(options.onClose);
+      //options.onChange(false); @Alert: Dont forget to implement this one
+    }
+  }, {
+    key: '_changeDrawerClass',
+    value: function _changeDrawerClass(toAddClassList, toRemoveClassList) {
+      var set = this.state.drawerClassName;
+      if (!Array.isArray(toAddClassList)) set.add(toAddClassList);else toAddClassList.forEach(function (className) {
+        set.add(className);
+      });
+      if (!Array.isArray(toRemoveClassList)) set.delete(toRemoveClassList);else toRemoveClassList.forEach(function (className) {
+        set.delete(className);
+      });
+
+      this.setState({ drawerClassName: set });
+    }
+  }, {
+    key: '_removeDrawerClass',
+    value: function _removeDrawerClass(className) {
+      var newClassName = this.state.drawerClassName.replace(className, "");
+      this.setState({ drawerClassName: newClassName });
+    }
+  }, {
+    key: '_addDrawerClass',
+    value: function _addDrawerClass(className) {
+      var newClassName = this.state.drawerClassName + ' ' + className;
+      this.setState({ drawerClassName: newClassName });
+    }
   }]);
 
-  return Sidebar;
-}(_react.Component);
+  return Drawer;
+}(_react2.default.Component);
 
-Sidebar.propTypes = {
-  // main content to render
-  children: _propTypes2.default.node.isRequired,
+exports.default = Drawer;
 
-  // styles
-  styles: _propTypes2.default.shape({
-    root: _propTypes2.default.object,
-    sidebar: _propTypes2.default.object,
-    content: _propTypes2.default.object,
-    overlay: _propTypes2.default.object,
-    dragHandle: _propTypes2.default.object
-  }),
+/***/ }),
+/* 38 */
+/***/ (function(module, exports, __webpack_require__) {
 
-  // root component optional class
-  rootClassName: _propTypes2.default.string,
+// style-loader: Adds some css to the DOM by adding a <style> tag
 
-  // sidebar optional class
-  sidebarClassName: _propTypes2.default.string,
+// load the styles
+var content = __webpack_require__(39);
+if(typeof content === 'string') content = [[module.i, content, '']];
+// Prepare cssTransformation
+var transform;
 
-  // content optional class
-  contentClassName: _propTypes2.default.string,
+var options = {"hmr":true}
+options.transform = transform
+// add the styles to the DOM
+var update = __webpack_require__(16)(content, options);
+if(content.locals) module.exports = content.locals;
+// Hot Module Replacement
+if(false) {
+	// When the styles change, update the <style> tags
+	if(!content.locals) {
+		module.hot.accept("!!../../node_modules/css-loader/index.js!./sidebar.css", function() {
+			var newContent = require("!!../../node_modules/css-loader/index.js!./sidebar.css");
+			if(typeof newContent === 'string') newContent = [[module.id, newContent, '']];
+			update(newContent);
+		});
+	}
+	// When the module is disposed, remove the <style> tags
+	module.hot.dispose(function() { update(); });
+}
 
-  // overlay optional class
-  overlayClassName: _propTypes2.default.string,
+/***/ }),
+/* 39 */
+/***/ (function(module, exports, __webpack_require__) {
 
-  // sidebar content to render
-  sidebar: _propTypes2.default.node.isRequired,
+exports = module.exports = __webpack_require__(15)(undefined);
+// imports
 
-  // boolean if sidebar should be docked
-  docked: _propTypes2.default.bool,
 
-  // boolean if sidebar should slide open
-  open: _propTypes2.default.bool,
+// module
+exports.push([module.i, ".drawer-wrapper {\n  position: relative;\n  z-index: 0;\n  height: 100%;\n  overflow: hidden;\n}\n.drawer {\n  width: 280px;\n  height: 100%;\n  position: absolute;\n  top: 0;\n  /*left: -280px;*/\n}\n.drawer-handle {\n  position: absolute;\n  top: 56px;\n  height: 100%;\n  \n}\n.right-side-panel .drawer-handle {\n  position: absolute;\n  top: 56px;\n  height: auto !important;\n  bottom: 52px;\n  \n}\n.drawer.opened {\n  transition: all 0.3s ease !important;\n  -webkit-transition: all 0.3s ease !important;\n  -moz-transition: all 0.3s ease !important;\n}\n.drawer.closed {\n  transition: all 0.3s ease !important;\n  -webkit-transition: all 0.3s ease !important;\n  -moz-transition: all 0.3s ease !important;\n}\n.drawer-mask {\n  width: 100%;\n  height: 100%;\n  position: absolute;\n  top: 0;\n  left: 0;\n  background-color: #000;\n  opacity: 0.0;\n  z-index: -1;\n}\n", ""]);
 
-  // boolean if transitions should be disabled
-  transitions: _propTypes2.default.bool,
+// exports
 
-  // boolean if touch gestures are enabled
-  touch: _propTypes2.default.bool,
-
-  // max distance from the edge we can start touching
-  touchHandleWidth: _propTypes2.default.number,
-
-  // Place the sidebar on the right
-  pullRight: _propTypes2.default.bool,
-
-  // Enable/Disable sidebar shadow
-  shadow: _propTypes2.default.bool,
-
-  // distance we have to drag the sidebar to toggle open state
-  dragToggleDistance: _propTypes2.default.number,
-
-  // callback called when the overlay is clicked
-  onSetOpen: _propTypes2.default.func,
-
-  // Intial sidebar width when page loads
-  defaultSidebarWidth: _propTypes2.default.number
-};
-
-Sidebar.defaultProps = {
-  docked: false,
-  open: false,
-  transitions: true,
-  touch: true,
-  touchHandleWidth: 20,
-  pullRight: false,
-  shadow: true,
-  dragToggleDistance: 30,
-  onSetOpen: function onSetOpen() {},
-  styles: {},
-  defaultSidebarWidth: 0
-};
-
-exports.default = Sidebar;
 
 /***/ })
 /******/ ]);
